@@ -1,9 +1,9 @@
 # API Gateway
 
-## Problem (Simple)
+## Problem
 When many different clients call multiple backend services directly, there’s no single place to control access, prevent abuse, record activity, or protect the system when one service starts failing. This leads to unfair traffic spikes, missing audit trails, and outages that spread across the system.
 
-## Solution (Simple)
+## Solution
 We provide a single, controlled entry point that sits between clients and backend services. It enforces access, limits traffic, records activity, and keeps the system stable when a backend misbehaves.
 
 ## What This Gateway Does
@@ -15,7 +15,7 @@ We provide a single, controlled entry point that sits between clients and backen
 - Admin endpoints for live status
 - UI dashboard + simulation controls
 
-## What Is a Circuit Breaker (Simple)
+## What Is a Circuit Breaker
 A circuit breaker is a safety switch. If a backend keeps failing, the gateway stops sending requests to it for a short time so the system doesn’t waste time or overload a broken service. After a cooldown, it tries again.
 
 ## Basic Design
@@ -54,7 +54,7 @@ flowchart LR
   HealthChecker --> LoadBalancer
 ```
 
-## UI (React)
+## UI
 The UI is a simple React dashboard (loaded via CDN in a static HTML file). It shows:
 - Overall metrics (total, accepted, rejected, auth failures, rate limit blocks, circuit blocks, backend errors)
 - Backend health and circuit states
