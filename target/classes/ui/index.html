@@ -1,0 +1,333 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>API Gateway UI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0f1216;
+      --panel: #171c22;
+      --panel-2: #1f2530;
+      --text: #e8ecf1;
+      --muted: #a9b2be;
+      --accent: #60d3a2;
+      --warn: #f1b35b;
+      --bad: #ef6c6c;
+      --border: #2b3340;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Space Grotesk", sans-serif;
+      color: var(--text);
+      background: radial-gradient(1200px 600px at 10% -10%, #1c2430, transparent),
+                  radial-gradient(900px 500px at 110% 0%, #1a3a2c, transparent),
+                  var(--bg);
+    }
+    .page { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .title { font-size: 28px; font-weight: 600; letter-spacing: 0.2px; }
+    .tabs { display: flex; gap: 8px; }
+    .tab {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .tab.active { background: var(--panel-2); border-color: #3a465a; }
+    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; margin-top: 18px; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      min-height: 100px;
+    }
+    .card h3 { margin: 0 0 8px 0; font-size: 16px; color: var(--muted); font-weight: 500; }
+    .metric { font-size: 26px; font-weight: 600; }
+    .badge { display: inline-block; padding: 4px 8px; border-radius: 999px; font-size: 12px; }
+    .badge.ok { background: rgba(96, 211, 162, 0.15); color: var(--accent); }
+    .badge.warn { background: rgba(241, 179, 91, 0.15); color: var(--warn); }
+    .badge.bad { background: rgba(239, 108, 108, 0.15); color: var(--bad); }
+    .list { display: flex; flex-direction: column; gap: 10px; }
+    .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .mono { font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; }
+    .logs { max-height: 340px; overflow: auto; }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; }
+    .btn {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .btn:hover { border-color: #3a465a; }
+    .input {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 8px;
+      min-width: 260px;
+    }
+    .statusline { color: var(--muted); font-size: 12px; margin-top: 8px; }
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: repeat(6, 1fr); }
+    }
+    @media (max-width: 600px) {
+      .grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script>window.__DEFAULT_TAB__ = "dashboard";</script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useEffect, useMemo, useState } = React;
+
+    function usePolling(fn, delay) {
+      useEffect(() => {
+        fn();
+        const id = setInterval(fn, delay);
+        return () => clearInterval(id);
+      }, [fn, delay]);
+    }
+
+    function badgeForStatus(status) {
+      if (status === 'HEALTHY') return 'ok';
+      if (status === 'UNHEALTHY') return 'bad';
+      return 'warn';
+    }
+
+    function App() {
+      const [tab, setTab] = useState(window.__DEFAULT_TAB__ || 'dashboard');
+      const [health, setHealth] = useState([]);
+      const [circuits, setCircuits] = useState([]);
+      const [metrics, setMetrics] = useState({});
+      const [logs, setLogs] = useState([]);
+      const [lastUpdated, setLastUpdated] = useState('');
+      const [resetMessage, setResetMessage] = useState('');
+
+      const refresh = () => {
+        Promise.all([
+          fetch('/admin/health').then(r => r.json()).catch(() => ({ health: [] })),
+          fetch('/admin/circuit').then(r => r.json()).catch(() => ({ circuits: [] })),
+          fetch('/admin/metrics').then(r => r.json()).catch(() => ({})),
+          fetch('/admin/logs').then(r => r.json()).catch(() => ({ logs: [] }))
+        ]).then(([h, c, m, l]) => {
+          setHealth(h.health || []);
+          setCircuits(c.circuits || []);
+          setMetrics(m || {});
+          setLogs(l.logs || []);
+          setLastUpdated(new Date().toLocaleTimeString());
+        });
+      };
+
+      usePolling(refresh, 3000);
+
+      const derived = useMemo(() => {
+        let accepted = 0;
+        let rejected = 0;
+        for (const log of logs) {
+          if (log.decision === 'ACCEPTED') accepted++;
+          if (log.decision === 'REJECTED') rejected++;
+        }
+        return { accepted, rejected };
+      }, [logs]);
+
+      return (
+        <div className="page">
+          <div className="topbar">
+            <div className="title">API Gateway Control</div>
+            <div className="tabs">
+              <button className={`tab ${tab === 'dashboard' ? 'active' : ''}`} onClick={() => setTab('dashboard')}>Dashboard</button>
+              <button className={`tab ${tab === 'simulate' ? 'active' : ''}`} onClick={() => setTab('simulate')}>Simulation</button>
+            </div>
+          </div>
+
+          {tab === 'dashboard' && (
+            <>
+              <div className="grid">
+                <div className="card" style={{ gridColumn: 'span 3' }}>
+                  <h3>Total Requests</h3>
+                  <div className="metric">{metrics.totalRequests ?? 0}</div>
+                </div>
+                <div className="card" style={{ gridColumn: 'span 3' }}>
+                  <h3>Accepted</h3>
+                  <div className="metric">{derived.accepted}</div>
+                </div>
+                <div className="card" style={{ gridColumn: 'span 3' }}>
+                  <h3>Rejected</h3>
+                  <div className="metric">{derived.rejected}</div>
+                </div>
+                <div className="card" style={{ gridColumn: 'span 3' }}>
+                  <h3>Auth Failures</h3>
+                  <div className="metric">{metrics.authFailures ?? 0}</div>
+                </div>
+                <div className="card" style={{ gridColumn: 'span 3' }}>
+                  <h3>Rate Limit Blocks</h3>
+                  <div className="metric">{metrics.rateLimitBlocked ?? 0}</div>
+                </div>
+                <div className="card" style={{ gridColumn: 'span 3' }}>
+                  <h3>Circuit Blocks</h3>
+                  <div className="metric">{metrics.circuitOpenBlocked ?? 0}</div>
+                </div>
+                <div className="card" style={{ gridColumn: 'span 3' }}>
+                  <h3>Backend Errors</h3>
+                  <div className="metric">{metrics.backendErrors ?? 0}</div>
+                </div>
+                <div className="card" style={{ gridColumn: 'span 3' }}>
+                  <h3>Last Updated</h3>
+                  <div className="metric mono">{lastUpdated || '...'}</div>
+                </div>
+                <div className="card" style={{ gridColumn: 'span 3' }}>
+                  <h3>Overload</h3>
+                  <div className={`badge ${metrics.overloaded ? 'bad' : 'ok'}`}>{metrics.overloaded ? 'ON' : 'OFF'}</div>
+                </div>
+                <div className="card" style={{ gridColumn: 'span 12' }}>
+                  <h3>Quick Actions</h3>
+                  <div className="controls">
+                    <button className="btn" onClick={async () => {
+                      setResetMessage('Working...');
+                      try {
+                        const res = await fetch('/admin/reset');
+                        const data = await res.json();
+                        setResetMessage(data.message || 'Reset complete');
+                        refresh();
+                      } catch (e) {
+                        setResetMessage('Reset failed');
+                      }
+                    }}>Clear Blockers (Make Healthy)</button>
+                  </div>
+                  <div className="statusline">{resetMessage}</div>
+                </div>
+              </div>
+
+              <div className="grid">
+                <div className="card" style={{ gridColumn: 'span 6' }}>
+                  <h3>Backend Health</h3>
+                  <div className="list">
+                    {health.map(item => (
+                      <div className="row" key={item.backendId}>
+                        <span>{item.backendId}</span>
+                        <span className={`badge ${badgeForStatus(item.status)}`}>{item.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="card" style={{ gridColumn: 'span 6' }}>
+                  <h3>Circuit Breakers</h3>
+                  <div className="list">
+                    {circuits.map(item => (
+                      <div className="row" key={item.backendId}>
+                        <span>{item.backendId}</span>
+                        <span className={`badge ${item.state === 'OPEN' ? 'bad' : 'ok'}`}>{item.state}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="card" style={{ marginTop: '16px' }}>
+                <h3>Recent Requests</h3>
+                <div className="logs">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Time</th>
+                        <th>Method</th>
+                        <th>Path</th>
+                        <th>Status</th>
+                        <th>Decision</th>
+                        <th>Reason</th>
+                        <th>Backend</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {logs.slice().reverse().map((log, idx) => (
+                        <tr key={idx}>
+                          <td className="mono">{new Date(log.timestamp).toLocaleTimeString()}</td>
+                          <td>{log.method}</td>
+                          <td className="mono">{log.path}</td>
+                          <td>{log.status}</td>
+                          <td>{log.decision}</td>
+                          <td>{log.reason}</td>
+                          <td>{log.backendId}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+
+          {tab === 'simulate' && (
+            <SimulationPanel />
+          )}
+        </div>
+      );
+    }
+
+    function SimulationPanel() {
+      const [base, setBase] = useState('http://localhost:9100');
+      const [pending, setPending] = useState(0);
+      const [result, setResult] = useState('No runs yet');
+
+      const runSim = async (path) => {
+        setPending(p => p + 1);
+        try {
+          const res = await fetch(base + path);
+          const data = await res.json();
+          setResult(JSON.stringify(data, null, 2));
+        } catch (e) {
+          setResult('Simulator not running at ' + base);
+        } finally {
+          setPending(p => Math.max(0, p - 1));
+        }
+      };
+
+      return (
+        <div className="grid">
+          <div className="card" style={{ gridColumn: 'span 12' }}>
+            <h3>Simulator</h3>
+            <div className="controls">
+              <input className="input" value={base} onChange={e => setBase(e.target.value)} />
+              <button className="btn" onClick={() => runSim('/simulate/auth/happy')}>Auth Happy</button>
+              <button className="btn" onClick={() => runSim('/simulate/auth/worst')}>Auth Worst</button>
+              <button className="btn" onClick={() => runSim('/simulate/rate/happy')}>Rate Happy</button>
+              <button className="btn" onClick={() => runSim('/simulate/rate/worst')}>Rate Worst</button>
+              <button className="btn" onClick={() => runSim('/simulate/circuit/happy')}>Circuit Happy</button>
+              <button className="btn" onClick={() => runSim('/simulate/circuit/worst')}>Circuit Worst</button>
+              <button className="btn" onClick={() => runSim('/simulate/health/happy')}>Health Happy</button>
+              <button className="btn" onClick={() => runSim('/simulate/health/worst')}>Health Worst</button>
+              <button className="btn" onClick={() => runSim('/simulate/load/happy')}>Load Happy</button>
+              <button className="btn" onClick={() => runSim('/simulate/load/worst')}>Load Worst</button>
+            </div>
+            <div className="statusline">Pending: {pending}</div>
+            <pre className="mono">{result}</pre>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
